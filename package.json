@@ -8,7 +8,7 @@
     "build": "vite build && node scripts/stage-assets.mjs",
     "preview": "vite preview",
     "qf": "node src/bin/qf.js",
-    "test": "node --test tests/core.test.mjs tests/cli.test.mjs"
+    "test": "node --test tests/core.test.mjs tests/cli.test.mjs tests/toon.test.mjs"
   },
   "keywords": [
     "3d",
@@ -29,5 +29,8 @@
   "type": "module",
   "bin": {
     "qf": "./src/bin/qf.js"
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "^1.1.1"
   }
 }

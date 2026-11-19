@@ -9,6 +9,12 @@ import * as P from './core/primitives.js';
 import { buildCharacter, CHAR_DEFAULTS } from './core/character.js';
 import { compileDocument } from './core/recipe.js';
 import { validateDocument, validateGeometry, formatErrors } from './core/schema.js';
+import { makeFaceTexture } from './editor/faceTexture.js';
+
+/** The decal is only meaningful in toon mode; PBR ignores it. */
+function viewportToonEnabled(app) {
+  return app.viewport?.renderStyle === 'toon';
+}
 import { booleanOp } from './core/booleans.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
@@ -243,6 +249,12 @@ export class App {
       subdiv: 0,
     });
     obj.parentCharacter = { ...CHAR_DEFAULTS, ...params };
+    // Marks the object for face-decal projection; the material also gets the
+    // generated face texture so toon shading can blend it in.
+    obj.isCharacter = true;
+    if (viewportToonEnabled(this)) {
+      obj.material.faceTexture = makeFaceTexture(THREE, obj.facePalette || 'default');
+    }
     this.viewport?.frameObject(obj);
     this.commitHistory('创建角色');
     this.refresh();

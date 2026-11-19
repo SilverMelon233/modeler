@@ -184,11 +184,11 @@ export function buildHumanoid(p = {}) {
   const torsoTop = 0.815 * H;      // acromion (shoulder top)
 
   const pelvisW = (0.084 + 0.026 * o.hips) * H;
-  const pelvisD = (0.046 + 0.018 * o.hips) * H;
+  const pelvisD = (0.062 + 0.022 * o.hips) * H;
   const waistW = (0.064 + 0.028 * o.belly) * H;
-  const waistD = (0.038 + 0.024 * o.belly) * H;
+  const waistD = (0.052 + 0.028 * o.belly) * H;
   const chestW = (0.086 + 0.020 * bld + 0.008 * mus) * H;
-  const chestD = (0.046 + 0.020 * bld) * H;
+  const chestD = (0.064 + 0.024 * bld) * H;
   const shoulderW = (0.100 + 0.018 * o.shoulder + 0.010 * bld) * H;
 
   // ---- base torso: a subdivided box, so every side is a clean quad grid ----
@@ -390,6 +390,58 @@ export function buildHumanoid(p = {}) {
     ]);
   }
 
+  /* ------------------------------------------------------------------ toes */
+  // Same trick as the fingers: the foot's front cap is a small grid, so its
+  // columns can each be extruded into a toe.
+  //
+  // The cap is found by restricting to the FOOT SLAB (below ankle height) and
+  // taking the forwardmost faces there. An earlier version scanned the whole
+  // leg below 0.08H, so `frontZ` was set by the shin and the selected faces were
+  // the inside of the ankle instead of the front of the foot.
+  for (const s of [1, -1]) {
+    // The foot's front cap is simply the set of forward-facing faces in the
+    // foot slab whose centre is within a toe-length of the furthest point.
+    // Deriving "furthest point" from the whole slab picked the instep, which is
+    // higher than the toes, so the cap set came out empty.
+    let frontZ = -Infinity;
+    for (const f of mesh.faces) {
+      const c = faceCenter(mesh.verts, f);
+      if (c[0] * s < 0.015 * H) continue;
+      if (c[1] > 0.055 * H) continue;
+      if (c[2] > frontZ) frontZ = c[2];
+    }
+    if (!isFinite(frontZ)) continue;
+
+    const capFaces = [];
+    mesh.faces.forEach((f, fi) => {
+      const c = faceCenter(mesh.verts, f);
+      if (c[0] * s < 0.015 * H || c[1] > 0.055 * H) return;
+      if (c[2] < frontZ - 0.012 * H) return;
+      capFaces.push(fi);
+    });
+    if (globalThis.__QF_TOE_DEBUG) console.log(`[toe s=${s}] frontZ=${frontZ.toFixed(3)} caps=${capFaces.length}`);
+
+    const cols = new Map();
+    for (const fi of capFaces) {
+      const c = faceCenter(mesh.verts, mesh.faces[fi]);
+      const k = Math.round(c[0] / (0.010 * H));
+      if (!cols.has(k)) cols.set(k, []);
+      cols.get(k).push(fi);
+    }
+    const keys = [...cols.keys()].sort((a, b) => a - b);
+    keys.forEach((k, idx) => {
+      const group = cols.get(k);
+      const colPts = new Set();
+      for (const fi of group) for (const i of mesh.faces[fi]) colPts.add(keyOf(mesh.verts[i]));
+      const inboard = idx === 0 || idx === keys.length - 1;
+      const len = (inboard ? 0.012 : 0.008) * H * o.footSize;
+      grow(colPts, [
+        { offset: [0, 0, len], scale: [0.96, 0.94, 1] },
+        { offset: [0, 0, len * 0.7], scale: [0.88, 0.86, 1] },
+      ]);
+    });
+  }
+
   // ---- neck + head ---------------------------------------------------------
   // HEAD.
   //
@@ -553,13 +605,40 @@ export function buildHumanoid(p = {}) {
   // silently wrong once the neck length changed: the mouth landed BELOW the
   // jaw, so the whole feature block did nothing. Anchoring the bands to the
   // measured head box keeps them on the face for every parameter combination.
-  const headVerts = mesh.verts.filter((v) => v[1] > torsoTop + 0.02 * H);
-  let headMinY = Infinity, headMaxY = -Infinity, headMaxZ = 0;
-  for (const v of headVerts) {
-    if (v[1] < headMinY) headMinY = v[1];
-    if (v[1] > headMaxY) headMaxY = v[1];
-    if (v[2] > headMaxZ) headMaxZ = v[2];
+  // Measure the head from geometry, but do NOT let the shoulders in: filtering
+  // on `y > torsoTop + 0.02H` includes the deltoids, and using their width to
+  // normalise `u` squeezed every facial feature toward the midline so they
+  // vanished.
+  //
+  // A fixed offset below the crown does not work either: at 1.58 m tall,
+  // `crown - 0.20H` still reaches the chest, and the resulting head box was
+  // nearly twice the real head height — every landmark landed on the wrong part
+  // of the face.
+  //
+  // The neck is the narrowest horizontal section below the head, and that is a
+  // fact about the silhouette rather than a tuning constant, so the head is
+  // found by scanning for it.
+  const crownY = Math.max(...mesh.verts.map((v) => v[1]));
+  const halfWidthAt = (y) => {
+    let w = 0;
+    for (const v of mesh.verts) {
+      if (Math.abs(v[1] - y) < 0.006) w = Math.max(w, Math.abs(v[0]));
+    }
+    return w;
+  };
+  let neckY = crownY - 0.30 * H;
+  let neckW = Infinity;
+  for (let y = crownY - 0.04 * H; y > crownY - 0.24 * H; y -= 0.006 * H) {
+    const w = halfWidthAt(y);
+    if (w > 1e-6 && w < neckW) { neckW = w; neckY = y; }
   }
+  const headMinY = neckY;
+  const headMaxY = crownY;
+
+  const headVerts = mesh.verts.filter((v) => v[1] > headMinY);
+  let headMaxZ = 0;
+  for (const v of headVerts) if (v[2] > headMaxZ) headMaxZ = v[2];
+  const headHalfW = Math.max(1e-6, Math.max(...headVerts.map((p) => Math.abs(p[0]))));
   const headSpan = Math.max(1e-6, headMaxY - headMinY);
   // 0 at the jaw, 1 at the crown
   const faceT = (y) => (y - headMinY) / headSpan;
@@ -604,30 +683,36 @@ export function buildHumanoid(p = {}) {
       // Facial form is applied only to the forward-facing shell, using
       // smooth radial bumps so Catmull-Clark does not turn them into creases.
       if (z > frontThresh) {
-        const u = x / Math.max(1e-6, Math.max(...headVerts.map((p) => Math.abs(p[0]))));
+        const u = x / headHalfW;
         const bump = (cu, ct, su, st, amp) =>
           amp * Math.exp(-(((u - cu) / su) ** 2)) * Math.exp(-(((t - ct) / st) ** 2));
 
+        // Landmarks as fractions of the measured head box (0 = jaw, 1 = crown).
+        // The measured box bottom sits at the jaw UNDERSIDE, so anatomical
+        // landmarks sit higher than raw fractions-of-height suggest. First table
+        // had eyes at 0.625, which placed them on the mouth.
+        //   eyes 0.78 | brow 0.84 | nose tip 0.66 | mouth 0.47 | chin 0.35
+        //
         // eye sockets (shallow), brow ridge above
-        z -= bump(-0.42, 0.625, 0.24, 0.075, 0.0175 * H);
-        z -= bump(0.42, 0.625, 0.24, 0.075, 0.0175 * H);
-        z += bump(-0.40, 0.712, 0.28, 0.045, 0.0090 * H);
-        z += bump(0.40, 0.712, 0.28, 0.045, 0.0090 * H);
+        z -= bump(-0.42, 0.780, 0.20, 0.050, 0.0090 * H);
+        z -= bump(0.42, 0.780, 0.20, 0.050, 0.0090 * H);
+        z += bump(-0.40, 0.842, 0.24, 0.030, 0.0055 * H);
+        z += bump(0.40, 0.842, 0.24, 0.030, 0.0055 * H);
 
         // nose ridge on the midline, with nostril flare
-        z += bump(0.00, 0.560, 0.11, 0.100, 0.0330 * H);
-        z += bump(-0.19, 0.495, 0.12, 0.038, 0.0080 * H);
-        z += bump(0.19, 0.495, 0.12, 0.038, 0.0080 * H);
+        z += bump(0.00, 0.670, 0.09, 0.070, 0.0140 * H);
+        z += bump(-0.19, 0.625, 0.10, 0.026, 0.0045 * H);
+        z += bump(0.19, 0.625, 0.10, 0.026, 0.0045 * H);
 
         // mouth groove with lips either side, and a chin below
-        z -= bump(0.00, 0.372, 0.28, 0.028, 0.0090 * H);
-        z += bump(0.00, 0.404, 0.28, 0.020, 0.0060 * H);
-        z += bump(0.00, 0.340, 0.28, 0.020, 0.0060 * H);
-        z += bump(0.00, 0.285, 0.32, 0.055, 0.0080 * H);
+        z -= bump(0.00, 0.470, 0.22, 0.020, 0.0030 * H);
+        z += bump(0.00, 0.500, 0.22, 0.014, 0.0022 * H);
+        z += bump(0.00, 0.440, 0.22, 0.014, 0.0022 * H);
+        z += bump(0.00, 0.360, 0.22, 0.040, 0.0035 * H);
 
         // cheekbones
-        z += bump(-0.62, 0.470, 0.20, 0.090, 0.0060 * H);
-        z += bump(0.62, 0.470, 0.20, 0.090, 0.0060 * H);
+        z += bump(-0.62, 0.600, 0.18, 0.070, 0.0030 * H);
+        z += bump(0.62, 0.600, 0.18, 0.070, 0.0030 * H);
       }
     }
     return [x, y, z];

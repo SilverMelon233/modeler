@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import { toRenderData, toWireframeTris, bounds, catmullClark, vertexNormals } from '../core/mesh.js';
+import { makeToonMaterial, makeOutlineMaterial } from './toon.js';
+import { projectFaceUV, faceMask, headBox } from './faceUV.js';
+import { makeFaceTexture } from './faceTexture.js';
 
 let uid = 1;
 
@@ -27,8 +30,20 @@ export class SceneObject {
       wireframe: false,
       transmission: 0,
       emissive: '#000000',
+      // toon-shading controls (used when the viewport render style is 'toon')
+      shadeColor: null,     // null -> derived from the base colour's hue
+      rimColor: '#cfe8ff',
+      rimPower: 2.6,
+      rimStrength: 0.55,
+      bands: 3,
+      specular: 0,
+      specColor: '#ffffff',
+      outline: true,
+      outlineColor: '#241a2e',
     };
     this.subdiv = opts.subdiv ?? 0;
+    // Marks the object as a humanoid body, so the face decal is projected.
+    this.isCharacter = opts.isCharacter ?? false;
     this.visible = true;
     this.locked = false;
     this._geoCache = null;   // { level, geometry, triBase, mesh }
@@ -63,6 +78,19 @@ export class SceneObject {
     return { mesh: m, faceSource: src };
   }
 
+  /**
+   * UV + mask for the face decal.
+   *
+   * Computed on the DISPLAY mesh (after subdivision) rather than the base mesh,
+   * because the geometry that reaches the shader is the subdivided one and the
+   * UVs must line up with its vertices, not the control cage's.
+   */
+  faceAttributes(mesh) {
+    if (!this.isCharacter) return null;
+    const box = headBox(mesh);
+    return { uv: projectFaceUV(mesh, box), mask: faceMask(mesh, box) };
+  }
+
   getGeometry() {
     const key = this.subdiv;
     if (this._geoCache && this._geoCache.level === key) return this._geoCache;
@@ -71,6 +99,11 @@ export class SceneObject {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
     g.setIndex(new THREE.BufferAttribute(data.indices, 1));
+    const fa = this.faceAttributes(mesh);
+    if (fa) {
+      g.setAttribute('uv', new THREE.BufferAttribute(fa.uv, 2));
+      g.setAttribute('aFaceMask', new THREE.BufferAttribute(fa.mask, 1));
+    }
     g.computeVertexNormals();
     g.computeBoundingSphere();
     g.computeBoundingBox();
@@ -111,7 +144,34 @@ export function createGroup(obj) {
   return group;
 }
 
-export function buildMaterial(mat) {
+/**
+ * Derive a cool shadow tint from the base colour.
+ *
+ * Shadowed skin in anime art shifts toward violet, not brown, so the shade is
+ * the base hue rotated toward blue and darkened — not simply the albedo times a
+ * constant. Doing this automatically means a new material colour still looks
+ * right without hand-tuning two colours per part.
+ */
+export function deriveShade(hex) {
+  const base = new THREE.Color(hex);
+  // A desaturated blue-violet anchor: every base colour moves toward the same
+  // place in colour space, which is what a shadow ramp should do. Rotating the
+  // hue instead is only "toward violet" for hues that already sit near blue —
+  // for skin (hue ~28 deg) it rotated through yellow, and a peach base produced
+  // a bright yellow shadow, visible as a yellow band under the chin.
+  const anchor = new THREE.Color('#6b5f96');
+  const shade = base.clone().lerp(anchor, 0.80);
+  const hsl = { h: 0, s: 0, l: 0 };
+  shade.getHSL(hsl);
+  shade.setHSL(hsl.h, Math.min(1, hsl.s * 1.10), Math.max(0.10, hsl.l * 0.62));
+  return '#' + shade.getHexString();
+}
+
+export function buildMaterial(mat, opts = {}) {
+  if (opts.style === 'toon') {
+    const toonMat = { ...mat, shadeColor: mat.shadeColor || deriveShade(mat.color) };
+    return makeToonMaterial(toonMat, opts.lights);
+  }
   const m = new THREE.MeshStandardMaterial({
     color: new THREE.Color(mat.color),
     metalness: mat.metalness,

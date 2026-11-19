@@ -51,9 +51,24 @@ export function buildUI(app) {
   const topActions = el('div', { class: 'top-actions' });
   const undoBtn = el('button', { class: 'icon-btn', title: '撤销 (Ctrl+Z)', onclick: () => app.undo() }, icon(ICONS.undo, 17));
   const redoBtn = el('button', { class: 'icon-btn', title: '重做 (Ctrl+Shift+Z)', onclick: () => app.redo() }, icon(ICONS.redo, 17));
+  // Render style: physically based, or cel/anime. Kept in the top bar because
+  // it changes how everything in the scene is shaded, not one object.
+  let renderStyle = 'pbr';
+  const styleBtn = el('button', {
+    class: 'btn ghost',
+    title: '切换渲染风格（PBR / 卡通）',
+    onclick: () => {
+      renderStyle = renderStyle === 'pbr' ? 'toon' : 'pbr';
+      styleBtn.textContent = renderStyle === 'pbr' ? 'PBR' : '卡通';
+      styleBtn.classList.toggle('primary', renderStyle === 'toon');
+      app.viewport?.setRenderStyle(renderStyle);
+      app.refresh();
+    },
+  }, 'PBR');
+
   const exportBtn = el('button', { class: 'btn primary', onclick: () => openExport() }, icon(ICONS.export, 15), '导出');
   const importBtn = el('button', { class: 'btn ghost', title: '打开 .quadforge.json', onclick: () => openImport() }, icon(ICONS.folder, 15), '打开');
-  topActions.append(importBtn, undoBtn, redoBtn, exportBtn);
+  topActions.append(importBtn, styleBtn, undoBtn, redoBtn, exportBtn);
 
   const topbar = el('header', { class: 'topbar' }, brand, modeBar, topActions);
 
@@ -445,6 +460,6 @@ export function buildUI(app) {
     setTimeout(() => input.remove(), 1000);
   }
 
-  app.ui = { rebuildToolbar, renderInspector, openExport, openImport, renderStatus };
+  app.ui = { rebuildToolbar, renderInspector, openExport, openImport, renderStatus, setRenderStyle: (s) => { renderStyle = s; app.viewport?.setRenderStyle(s); styleBtn.textContent = s === 'pbr' ? 'PBR' : '卡通'; styleBtn.classList.toggle('primary', s === 'toon'); } };
   return app.ui;
 }

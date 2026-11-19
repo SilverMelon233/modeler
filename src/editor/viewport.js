@@ -7,6 +7,8 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { OutlinePass } from 'three/addons/postprocessing/OutlinePass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { buildMaterial, createGroup } from './object.js';
+import { makeOutlineMaterial, ANIME_PRESET } from './toon.js';
+import { makeFaceTexture } from './faceTexture.js';
 import { toWireframeTris, faceNormal, faceCenter, add, mul, sub } from '../core/mesh.js';
 
 const ACCENT = 0x4cc2ff;
@@ -124,6 +126,30 @@ export class Viewport {
     const fill = new THREE.DirectionalLight(0xffd9b8, 0.34);
     fill.position.set(-2.0, 1.2, 3.4);
     this.scene.add(fill);
+
+    // Toon shading needs directions in VIEW space, so they are recomputed per
+    // frame from these world-space anchors rather than baked once.
+    this.lightAnchors = { key, rim: rim };
+    this.renderStyle = 'pbr';
+  }
+
+  /** Light directions in view space, consumed by the toon shader. */
+  toonLights() {
+    // For cel shading the key is placed well off the view axis; a light near the
+    // camera fills every visible normal and the banded ramp degenerates to one
+    // flat tone. In view space +Z is toward the camera, so the key sits at
+    // roughly 50 degrees to the left and 30 degrees up.
+    return {
+      keyDir: new THREE.Vector3(-0.62, 0.55, 0.56).normalize(),
+      rimDir: new THREE.Vector3(0.55, 0.35, -0.75).normalize(),
+    };
+  }
+
+  materialFor(obj) {
+    return buildMaterial(obj.material, {
+      style: this.renderStyle,
+      lights: this.toonLights(),
+    });
   }
 
   _setupPost() {
@@ -183,17 +209,28 @@ export class Viewport {
   /* --------------------------------------------------------------- objects */
 
   sync(objects) {
+    this._objectsById = new Map(objects.map((o) => [o.id, o]));
     const alive = new Set();
     for (const obj of objects) {
       alive.add(obj.id);
       let view = this.views.get(obj.id);
       if (!view) {
         const group = createGroup(obj);
-        const mesh = new THREE.Mesh(obj.getGeometry().geometry, buildMaterial(obj.material));
+        const mesh = new THREE.Mesh(obj.getGeometry().geometry, this.materialFor(obj));
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         mesh.userData.objectId = obj.id;
         group.add(mesh);
+
+        // Inverted-hull outline (named distinctly from this.outline, which is
+        // the post-process selection outline).
+        const hull = new THREE.Mesh(
+          obj.getGeometry().geometry,
+          makeOutlineMaterial(obj.material.outlineColor || '#2a1f33', 0.0022),
+        );
+        hull.visible = false;
+        hull.userData.isOutline = true;
+        group.add(hull);
 
         const lines = new THREE.LineSegments(
           obj.getWireGeometry(),
@@ -203,15 +240,16 @@ export class Viewport {
         group.add(lines);
 
         this.root.add(group);
-        view = { group, mesh, lines, signature: '' };
+        view = { group, mesh, lines, hull, signature: '' };
         this.views.set(obj.id, view);
       }
       const sig = `${obj.subdiv}|${obj.mesh.verts.length}|${obj.mesh.faces.length}|${JSON.stringify(obj.material)}|${obj.transform.position}|${obj.transform.rotation}|${obj.transform.scale}`;
       if (view.signature !== sig) {
         const { geometry } = obj.getGeometry();
         view.mesh.geometry = geometry;
-        view.mesh.material = buildMaterial(obj.material);
+        view.mesh.material = this.materialFor(obj);
         view.lines.geometry = obj.getWireGeometry();
+        view.hull.geometry = geometry;
         view.signature = sig;
       }
       view.group.position.fromArray(obj.transform.position);
@@ -261,6 +299,27 @@ export class Viewport {
 
   setGizmoMode(mode) {
     this.gizmo.setMode(mode);
+  }
+
+  /** Switch between physically-based and cel shading. */
+  setRenderStyle(style) {
+    this.renderStyle = style;
+    // The face decal lives on the material, so objects created before toon mode
+    // was enabled do not have a texture yet.
+    if (style === 'toon') {
+      for (const [id, obj] of this._objectsById || []) {
+        if (obj.isCharacter && !obj.material.faceTexture) {
+          obj.material.faceTexture = makeFaceTexture(THREE, obj.facePalette || 'default');
+        }
+        void id;
+      }
+    }
+    for (const v of this.views.values()) {
+      const objId = v.group.userData.objectId;
+      const obj = this._objectsById?.get(objId);
+      if (obj) v.mesh.material = this.materialFor(obj);
+      v.hull.visible = style === 'toon' && obj?.material?.outline !== false;
+    }
   }
 
   setEditMode(on, showWireframe = true) {
