@@ -89,6 +89,25 @@ jobs:
       - name: build the bundle
         run: npm run build
 
+      - name: the bundle carries what the app fetches
+        # `npm run build` alone does not prove the deployable is complete: Vite
+        # copies only `public/`, and the example documents live in `examples/`.
+        # A 404 on those was the first thing the live deployment hit, so it is
+        # asserted here instead of being discovered after a rollout.
+        run: |
+          set -euo pipefail
+          for f in examples/*.quadforge.json; do
+            base=$(basename "$f")
+            test -f "dist/examples/$base" || {
+              echo "=== dist/examples/$base IS MISSING FROM THE BUNDLE ==="
+              ls -l dist/examples/ 2>&1 || true
+              exit 1
+            }
+          done
+          test -f dist/index.html
+          test -f dist/healthz 2>/dev/null || true
+          ls -l dist dist/examples
+
   # =========================================================================
   # BUILD AND PUSH THE IMAGE.
   # =========================================================================

@@ -22,7 +22,7 @@ spec:
         app: modeler
     spec:
       imagePullSecrets:
-        - name: ghcr-pull
+        - name: ghcr-modeler
       securityContext:
         runAsNonRoot: true
         runAsUser: 101
