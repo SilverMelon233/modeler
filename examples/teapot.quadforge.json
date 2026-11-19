@@ -1,0 +1,342 @@
+{
+  "schema": "quadforge/1",
+  "version": 1,
+  "unit": "m",
+  "meta": {
+    "title": "茶壶与杯子",
+    "description": "纯配方编写的静物：loft 壶身 + tube 把手 + 圆环壶盖，杯子用 extrude 含孔轮廓。",
+    "tags": [
+      "still-life",
+      "llm-authored"
+    ]
+  },
+  "materials": {
+    "ceramic": {
+      "color": "#e6e1d8",
+      "metalness": 0.0,
+      "roughness": 0.38
+    },
+    "glaze": {
+      "color": "#3d6f7a",
+      "metalness": 0.05,
+      "roughness": 0.22
+    }
+  },
+  "objects": [
+    {
+      "id": "teapot-body",
+      "name": "壶身",
+      "kind": "part",
+      "material": "ceramic",
+      "transform": {
+        "position": [
+          -0.35,
+          0,
+          0
+        ]
+      },
+      "parts": [
+        {
+          "id": "belly",
+          "op": "merge",
+          "prim": {
+            "type": "loft",
+            "radial": 28,
+            "sections": [
+              {
+                "y": 0.0,
+                "rx": 0.105,
+                "rz": 0.105,
+                "e": 2.6
+              },
+              {
+                "y": 0.03,
+                "rx": 0.132,
+                "rz": 0.132,
+                "e": 2.4
+              },
+              {
+                "y": 0.09,
+                "rx": 0.15,
+                "rz": 0.15,
+                "e": 2.2
+              },
+              {
+                "y": 0.16,
+                "rx": 0.142,
+                "rz": 0.142,
+                "e": 2.2
+              },
+              {
+                "y": 0.21,
+                "rx": 0.112,
+                "rz": 0.112,
+                "e": 2.3
+              },
+              {
+                "y": 0.24,
+                "rx": 0.082,
+                "rz": 0.082,
+                "e": 2.5
+              }
+            ]
+          }
+        },
+        {
+          "id": "spout",
+          "op": "merge",
+          "prim": {
+            "type": "tube",
+            "radial": 14,
+            "points": [
+              [
+                0.11,
+                0.13,
+                0
+              ],
+              [
+                0.19,
+                0.17,
+                0
+              ],
+              [
+                0.25,
+                0.23,
+                0
+              ]
+            ],
+            "radii": [
+              0.03,
+              0.024,
+              0.017
+            ]
+          }
+        },
+        {
+          "id": "handle",
+          "op": "merge",
+          "prim": {
+            "type": "tube",
+            "radial": 12,
+            "points": [
+              [
+                -0.12,
+                0.2,
+                0
+              ],
+              [
+                -0.21,
+                0.19,
+                0
+              ],
+              [
+                -0.23,
+                0.12,
+                0
+              ],
+              [
+                -0.2,
+                0.06,
+                0
+              ],
+              [
+                -0.12,
+                0.07,
+                0
+              ]
+            ],
+            "radii": [
+              0.018,
+              0.016,
+              0.015,
+              0.016,
+              0.018
+            ]
+          }
+        },
+        {
+          "id": "lid",
+          "op": "merge",
+          "prim": {
+            "type": "sphere",
+            "radius": 0.086,
+            "segments": 24,
+            "rings": 12
+          },
+          "transform": {
+            "position": [
+              0,
+              0.252,
+              0
+            ],
+            "scale": [
+              1,
+              0.42,
+              1
+            ]
+          }
+        },
+        {
+          "id": "knob",
+          "op": "merge",
+          "prim": {
+            "type": "sphere",
+            "radius": 0.026,
+            "segments": 16,
+            "rings": 10
+          },
+          "transform": {
+            "position": [
+              0,
+              0.29,
+              0
+            ]
+          }
+        },
+        {
+          "id": "foot",
+          "op": "merge",
+          "prim": {
+            "type": "cylinder",
+            "radius": 0.086,
+            "height": 0.014,
+            "segments": 28
+          },
+          "transform": {
+            "position": [
+              0,
+              -0.006,
+              0
+            ]
+          }
+        }
+      ],
+      "deform": [
+        {
+          "type": "weld",
+          "tolerance": 1e-05
+        }
+      ]
+    },
+    {
+      "id": "cup",
+      "name": "茶杯",
+      "kind": "part",
+      "material": "glaze",
+      "transform": {
+        "position": [
+          0.34,
+          0,
+          0.06
+        ]
+      },
+      "parts": [
+        {
+          "id": "outer",
+          "op": "merge",
+          "prim": {
+            "type": "loft",
+            "radial": 32,
+            "sections": [
+              {
+                "y": 0.0,
+                "rx": 0.04,
+                "rz": 0.04,
+                "e": 2.0
+              },
+              {
+                "y": 0.008,
+                "rx": 0.044,
+                "rz": 0.044,
+                "e": 2.0
+              },
+              {
+                "y": 0.06,
+                "rx": 0.052,
+                "rz": 0.052,
+                "e": 2.0
+              },
+              {
+                "y": 0.108,
+                "rx": 0.058,
+                "rz": 0.058,
+                "e": 2.0
+              }
+            ]
+          }
+        },
+        {
+          "id": "hollow",
+          "op": "subtract",
+          "prim": {
+            "type": "loft",
+            "radial": 32,
+            "sections": [
+              {
+                "y": 0.012,
+                "rx": 0.034,
+                "rz": 0.034,
+                "e": 2.0
+              },
+              {
+                "y": 0.06,
+                "rx": 0.043,
+                "rz": 0.043,
+                "e": 2.0
+              },
+              {
+                "y": 0.115,
+                "rx": 0.05,
+                "rz": 0.05,
+                "e": 2.0
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "saucer",
+      "name": "茶碟",
+      "kind": "part",
+      "material": "ceramic",
+      "transform": {
+        "position": [
+          0.34,
+          0,
+          0.06
+        ]
+      },
+      "parts": [
+        {
+          "id": "plate",
+          "op": "merge",
+          "prim": {
+            "type": "loft",
+            "radial": 32,
+            "sections": [
+              {
+                "y": 0.0,
+                "rx": 0.098,
+                "rz": 0.098,
+                "e": 2.0
+              },
+              {
+                "y": 0.008,
+                "rx": 0.112,
+                "rz": 0.112,
+                "e": 2.0
+              },
+              {
+                "y": 0.013,
+                "rx": 0.118,
+                "rz": 0.118,
+                "e": 2.0
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

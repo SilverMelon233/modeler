@@ -1,0 +1,145 @@
+name: image
+
+# Build QuadForge into a container image and publish it to GHCR.
+#
+# WHY AN IMAGE. The app is static files, but "npm install && npm run build on
+# the target" is a build step pretending to be a deploy: the toolchain version
+# drifts, the tests are skipped, and nothing records what was shipped. The
+# image pins all of it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "Push the image to ghcr"
+        type: boolean
+        default: true
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "examples/**"
+      - "deploy/**"
+      - "index.html"
+      - "package.json"
+      - "package-lock.json"
+      - "Dockerfile"
+      - ".github/workflows/image.yml"
+
+# Only the newest build can matter, because deploy pulls :latest.
+concurrency:
+  group: image
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # =========================================================================
+  # TEST FIRST, ON THE RUNNER.
+  #
+  # This is a separate job from the image build on purpose: a red test should
+  # fail fast with the assertion visible, not buried in a docker build log.
+  # It repeats the test that the Dockerfile also runs. That is not redundancy:
+  # the job is the gate that reads clearly, and the Dockerfile check is what
+  # guarantees the shipped bytes were tested even if someone builds locally.
+  # =========================================================================
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: geometry and CLI tests
+        run: npm test
+
+      - name: the CLI compiles a documented example
+        # The tests cover the kernel; this proves the shipped CLI still turns a
+        # real document into a watertight mesh end to end.
+        run: |
+          set -euo pipefail
+          node src/bin/qf.js validate examples/hero.quadforge.json
+          node src/bin/qf.js validate examples/teapot.quadforge.json
+          out=$(node src/bin/qf.js stats examples/hero.quadforge.json --json)
+          printf '%s\n' "$out" | node -e '
+            let s = "";
+            process.stdin.on("data", (d) => (s += d)).on("end", () => {
+              const r = JSON.parse(s);
+              if (!r.ok) { console.error("stats failed"); process.exit(1); }
+              const bad = r.objects.filter((o) => !o.watertight || o.openEdges !== 0);
+              if (bad.length) {
+                console.error("not watertight:", bad.map((o) => o.id).join(", "));
+                process.exit(1);
+              }
+              console.log("all objects watertight:", r.objects.map((o) => o.id).join(", "));
+            });'
+
+      - name: build the bundle
+        run: npm run build
+
+  # =========================================================================
+  # BUILD AND PUSH THE IMAGE.
+  # =========================================================================
+  image:
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # `inputs.push != false` was the trap in the easyvm workflow: on a push
+      # event the input is empty, so `'' != false` is false and nothing is
+      # published while the job reports success. This spells out the intent:
+      # a push to main publishes; a manual run publishes unless unticked.
+      - name: log in to ghcr
+        if: github.event_name != 'workflow_dispatch' || inputs.push
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          # `latest` is what the deployment pulls; the sha is what makes an
+          # image traceable back to a commit.
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=,format=short
+
+      - name: build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: ${{ github.event_name != 'workflow_dispatch' || inputs.push }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: report the digest
+        # A deploy is only reproducible if the digest is in the log.
+        run: |
+          echo "### image pushed" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

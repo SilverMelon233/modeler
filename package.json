@@ -1,0 +1,33 @@
+{
+  "name": "quadforge",
+  "version": "0.1.0",
+  "description": "浏览器参数化 3D 建模工作台 + 面向 LLM 的 .quadforge 格式工具链",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "qf": "node src/bin/qf.js",
+    "test": "node --test tests/core.test.mjs tests/cli.test.mjs"
+  },
+  "keywords": [
+    "3d",
+    "modeling",
+    "quad-mesh",
+    "catmull-clark",
+    "csg",
+    "threejs",
+    "llm"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.170.0",
+    "three-bvh-csg": "^0.0.17",
+    "vite": "^5.4.11"
+  },
+  "type": "module",
+  "bin": {
+    "qf": "./src/bin/qf.js"
+  }
+}

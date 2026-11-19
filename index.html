@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>QuadForge — 浏览器 3D 建模工作台</title>
+  <meta name="description" content="一个在浏览器里运行的参数化 3D 建模工具：四边形建模、Catmull-Clark 细分、雕刻、CSG 布尔、人物生成器，支持导出 STL / OBJ / GLB。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div id="boot">
+    <div class="boot-inner">
+      <div class="boot-logo">
+        <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round">
+          <path d="M12 2l9 5v10l-9 5-9-5V7z" />
+          <path d="M12 12l9-5M12 12L3 7M12 12v10" stroke-width="1" />
+        </svg>
+      </div>
+      <h1>QuadForge</h1>
+      <p>正在初始化建模内核…</p>
+      <div class="boot-bar"><i></i></div>
+    </div>
+  </div>
+  <div id="ui"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

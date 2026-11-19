@@ -1,0 +1,10 @@
+[
+  { "op": "setRig", "path": "/objects/0", "value": { "build": 0.78, "muscle": 0.9, "shoulder": 0.72, "height": 1.9 } },
+  { "op": "setMaterial", "name": "skin", "value": { "color": "#c98d63", "roughness": 0.7 } },
+  { "op": "addPart", "path": "/objects/2", "value": {
+      "id": "lid",
+      "op": "merge",
+      "prim": { "type": "cylinder", "radius": 0.27, "height": 0.02, "segments": 32 },
+      "transform": { "position": [0, 0.505, 0] }
+  } }
+]

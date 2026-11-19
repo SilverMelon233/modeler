@@ -1,0 +1,102 @@
+{
+  "schema": "quadforge/1",
+  "version": 1,
+  "unit": "m",
+  "meta": {
+    "title": "哨兵 — 人形角色示例",
+    "description": "演示 kind=humanoid 参数化角色，附带一件武器（CSG 配方）与地面道具。",
+    "tags": ["character", "example"]
+  },
+  "materials": {
+    "skin": { "color": "#e5c3a6", "metalness": 0.0, "roughness": 0.68 },
+    "armor": { "color": "#7d8896", "metalness": 0.85, "roughness": 0.28 },
+    "cloth": { "color": "#3f4a5a", "metalness": 0.0, "roughness": 0.85 },
+    "steel": { "color": "#aab4c0", "metalness": 0.95, "roughness": 0.18 }
+  },
+  "objects": [
+    {
+      "id": "hero",
+      "name": "哨兵",
+      "kind": "humanoid",
+      "rig": {
+        "height": 1.82,
+        "build": 0.42,
+        "muscle": 0.62,
+        "headScale": 1.0,
+        "shoulder": 0.58,
+        "belly": 0.3,
+        "hips": 0.45,
+        "armLength": 1.0,
+        "legLength": 1.0,
+        "hair": true,
+        "armor": true
+      },
+      "material": "skin",
+      "subdiv": 0
+    },
+    {
+      "id": "blade",
+      "name": "长刀",
+      "kind": "part",
+      "material": "steel",
+      "transform": { "position": [0.62, 0.72, 0.06], "rotation": [0, 0, -0.28] },
+      "parts": [
+        {
+          "id": "blade-body",
+          "op": "merge",
+          "prim": {
+            "type": "loft",
+            "radial": 8,
+            "sections": [
+              { "y": -0.52, "rx": 0.006, "rz": 0.022, "e": 3.2 },
+              { "y": -0.30, "rx": 0.010, "rz": 0.030, "e": 3.4 },
+              { "y": 0.05, "rx": 0.012, "rz": 0.034, "e": 3.4 },
+              { "y": 0.34, "rx": 0.009, "rz": 0.026, "e": 3.0 },
+              { "y": 0.48, "rx": 0.003, "rz": 0.010, "e": 2.2 }
+            ]
+          }
+        },
+        {
+          "id": "guard",
+          "op": "merge",
+          "prim": { "type": "roundedBox", "size": 1, "radius": 0.2, "segments": 3 },
+          "transform": { "position": [0, -0.55, 0], "scale": [0.11, 0.022, 0.045] }
+        },
+        {
+          "id": "grip",
+          "op": "merge",
+          "prim": { "type": "cylinder", "radius": 0.018, "height": 0.22, "segments": 12 },
+          "transform": { "position": [0, -0.67, 0] }
+        },
+        {
+          "id": "pommel",
+          "op": "merge",
+          "prim": { "type": "sphere", "radius": 0.028, "segments": 12, "rings": 8 },
+          "transform": { "position": [0, -0.79, 0] }
+        }
+      ]
+    },
+    {
+      "id": "crate",
+      "name": "货箱",
+      "kind": "part",
+      "material": "cloth",
+      "transform": { "position": [-0.85, 0.0, -0.35], "rotation": [0, 0.42, 0] },
+      "parts": [
+        {
+          "id": "box",
+          "op": "merge",
+          "prim": { "type": "roundedBox", "size": 0.5, "radius": 0.035, "segments": 3 },
+          "transform": { "position": [0, 0.25, 0] }
+        },
+        {
+          "id": "hole",
+          "op": "subtract",
+          "prim": { "type": "cylinder", "radius": 0.10, "height": 0.7, "segments": 20 },
+          "transform": { "position": [0, 0.25, 0] }
+        }
+      ],
+      "deform": [{ "type": "orient" }]
+    }
+  ]
+}
