@@ -78,7 +78,7 @@ src/core/            无渲染依赖的几何内核（Node 与浏览器共用）
   mesh.js            四边形/多边形拓扑、Catmull-Clark、挤出、雕刻、CSG 修复
   primitives.js      11 种图元（含 loft / tube / extrude）
   character.js       人物门面（当前实现委托给 humanoid.js）
-  humanoid.js        单连通曲面人体：盒状建模 + 挤出四肢/头
+  humanoid.js        单连通曲面人体：盒状建模 + 挤出四肢/头/手/脚 + 面部雕刻
   booleans.js        three-bvh-csg 封装
   recipe.js          .quadforge 编译器
   schema.js          JSON Schema + 校验器

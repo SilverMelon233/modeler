@@ -20,7 +20,8 @@
  */
 import { cube } from './primitives.js';
 import {
-  faceCenter, mergeByDistance, fixWinding, signedVolume,
+  faceCenter, faceNormal, mergeByDistance, fixWinding, signedVolume,
+  subdivideSelected, catmullClark,
 } from './mesh.js';
 
 const key = (a, b) => (a < b ? a + '_' + b : b + '_' + a);
@@ -73,7 +74,29 @@ export function extrudeRegion(mesh, faceIdxs, opts = {}) {
 
   const pivot = opts.pivot ?? centroidOf(mesh.verts, uniq);
   const offset = opts.offset ?? [0, 0, 0];
-  const sc = opts.scale ?? 1;
+
+  // Two ways to size the new cap:
+  //   scale: [sx, sy, sz]  — multiplier on the current cap (drifts when chained)
+  //   size:  [hx, hy, hz]  — ABSOLUTE half-extents about the pivot
+  // The absolute form is what limbs use: a chain of multipliers compounds and
+  // collapses the limb to a needle, which is exactly what happened before.
+  let sc;
+  if (opts.size) {
+    // Per-axis half-extent of the current cap about the pivot. A cap that lies
+    // in a plane has ZERO extent on its normal axis; for that axis the scale is
+    // taken from `size` relative to the cap's other axes' mean, which keeps the
+    // cross-section a sensible rectangle instead of a zero-thickness sheet.
+    const cur = [0, 0, 0];
+    for (const i of uniq) {
+      cur[0] = Math.max(cur[0], Math.abs(mesh.verts[i][0] - pivot[0]));
+      cur[1] = Math.max(cur[1], Math.abs(mesh.verts[i][1] - pivot[1]));
+      cur[2] = Math.max(cur[2], Math.abs(mesh.verts[i][2] - pivot[2]));
+    }
+    const mean = (cur[0] + cur[1] + cur[2]) / 3 || 1e-6;
+    sc = opts.size.map((h, k) => ((cur[k] > 1e-9 ? cur[k] : mean) > 0 ? h / (cur[k] > 1e-9 ? cur[k] : mean) : 1));
+  } else {
+    sc = opts.scale ?? 1;
+  }
   const [sx, sy, sz] = Array.isArray(sc) ? sc : [sc, sc, sc];
 
   const verts = mesh.verts.map((v) => v.slice());
@@ -169,7 +192,9 @@ export function buildHumanoid(p = {}) {
   const shoulderW = (0.100 + 0.018 * o.shoulder + 0.010 * bld) * H;
 
   // ---- base torso: a subdivided box, so every side is a clean quad grid ----
-  const N = 5;                    // 5x5 quads per box face
+  // N=7 gives a 7x7 quad grid per box face: enough columns to carve separate
+  // fingers and enough rows for a believable shoulder/hip transition.
+  const N = 7;
   let mesh = cube(1, N);
 
   // Sockets are picked on the *unscaled* box using its known face-centre grid:
@@ -178,16 +203,19 @@ export function buildHumanoid(p = {}) {
   const cell = 1 / N;
   const at = (v, cells) => cells.some((c) => Math.abs(v - (-0.5 + (c + 0.5) * cell)) < cell * 0.25);
   // rows counted from the bottom (-0.5) upward
-  const ARM_ROWS = [3];                 // one row of cells just below the shoulder
-  const ARM_COLS = [1, 2];              // centred on the side, skipping the corners
+  // N=7 columns are at -0.4286 .. +0.4286 in steps of 1/7.
+  // The arm socket spans 5 of them so the hand has enough columns to split into
+  // fingers later; the two outermost columns stay as the shoulder cap.
+  const ARM_ROWS = [4];                 // just below the shoulder line
+  const ARM_COLS = [1, 2, 3, 4, 5];
   // A leg socket must not cross the body's midline: cells are indexed from the
   // -X side, so a positive-side leg uses the cells at +0.2 and +0.4 (indices 3,4),
   // never index 2 (which is centred on x=0 and would weld both legs together).
   // Column indices are offset by half a cell: cell i sits at -0.5+(i+0.5)/N,
   // so N=5 gives x = -0.4,-0.2,0,+0.2,+0.4 for i = 0..4. A leg must never
   // include the centre column (i=2), or both legs weld along the midline.
-  const LEG_COLS_POS = [3, 4];        // x = +0.2, +0.4
-  const LEG_COLS_NEG = [0, 1];        // x = -0.4, -0.2
+  const LEG_COLS_POS = [4, 5];        // x = +0.143, +0.286
+  const LEG_COLS_NEG = [1, 2];        // x = -0.286, -0.143
 
   const sideFace = (sx) =>
     pickFaces(mesh, (c) =>
@@ -200,7 +228,7 @@ export function buildHumanoid(p = {}) {
   const armSockets = { '1': sideFace(1), '-1': sideFace(-1) };
   const legSockets = { '1': bottomFace(1), '-1': bottomFace(-1) };
   const neckSocket = pickFaces(mesh, (c) =>
-    Math.abs(c[1] - 0.5) < 1e-6 && at(c[0], [1, 2, 3]) && at(c[2], [1, 2, 3]));
+    Math.abs(c[1] - 0.5) < 1e-6 && at(c[0], [2, 3, 4]) && at(c[2], [2, 3, 4]));
 
   // Torso silhouette as a vertical profile (box coords -0.5..0.5 -> metres).
   const wKnots = [
@@ -258,11 +286,16 @@ export function buildHumanoid(p = {}) {
     return out;
   };
 
+  /**
+   * @param regionPts Set of vertex position keys (resolved on first use)
+   *   — or an array of face indices, already resolved by the caller
+   */
   const grow = (regionPts, steps) => {
+    const presolved = Array.isArray(regionPts) ? regionPts : null;
     let caps = null;
     for (const st of steps) {
-      const targets = caps ?? resolve(regionPts);
-      if (!targets.length) throw new Error('grow: socket did not resolve to any face');
+      const targets = caps ?? presolved ?? resolve(regionPts);
+      if (!targets || !targets.length) throw new Error('grow: socket did not resolve to any face');
       const r = extrudeRegion(mesh, targets, st);
       mesh = r.mesh;
       caps = r.capFaces;
@@ -285,27 +318,36 @@ export function buildHumanoid(p = {}) {
   // not a tube — the cross-section stays perpendicular to X while the axis
   // travels along Y. So the arm is grown HORIZONTALLY along its own normal to
   // build a proper tube, then rotated down about the shoulder afterwards.
-  const armLen = 0.46 * H * o.armLength;
-  const armR = (0.030 + 0.012 * mus) * H;
-  const armTips = {};
+  //
+  // Every section is sized with `size` (absolute half-extents) rather than a
+  // chained `scale`, because chained multipliers compound and collapse the limb.
+  const armLen = 0.44 * H * o.armLength;
+  const upperR = (0.026 + 0.010 * mus) * H;
+  const foreR = (0.020 + 0.007 * mus) * H;
+  const wristR = 0.015 * H;
+  const hs = o.handSize;
+  const palmHalfY = 0.040 * H * hs;      // across the hand (before the down-swing)
+  const palmHalfZ = 0.016 * H * hs;      // thickness
+
+  const armFingerCaps = {};
   for (const s of [1, -1]) {
-    const out = (dx, r) => ({
+    const cap = (dx, hy, hz = hy) => ({
       offset: [s * dx * H, 0, 0],
-      // thickness lives in Y/Z; the multiplier is relative to the current cap
-      scale: [1, r / armR, (r / armR) * 0.98],
+      size: [hy * 0.5, hy, hz],
     });
-    armTips[s] = grow(armRegion[String(s)], [
-      { offset: [s * 0.020 * H, 0, 0], scale: [1, 0.86, 0.90] },   // deltoid
-      out(0.055, armR * 0.94),
-      out(0.050, armR * 0.86),
-      out(0.045, armR * 0.72),      // elbow
-      out(0.045, armR * 0.80),
-      out(0.042, armR * 0.66),
-      out(0.038, armR * 0.52),      // wrist
-      // palm: wider in Y (across the hand), thinner in Z
-      { offset: [s * 0.030 * H, 0, 0], scale: [1, 1.55, 0.58] },
-      { offset: [s * 0.030 * H, 0, 0], scale: [1, 0.90, 0.86] },
-    ]);
+    const steps = [
+      cap(0.016, upperR * 1.35),                 // deltoid
+      cap(armLen * 0.10, upperR),
+      cap(armLen * 0.10, upperR * 0.92),
+      cap(armLen * 0.09, upperR * 0.78),         // elbow
+      cap(armLen * 0.09, foreR * 1.12),
+      cap(armLen * 0.09, foreR * 0.94),
+      cap(armLen * 0.08, wristR),                // wrist
+      // palm: wide across Y, thin in Z
+      { offset: [s * 0.030 * H * hs, 0, 0], size: [0.004 * H, palmHalfY, palmHalfZ] },
+      { offset: [s * 0.034 * H * hs, 0, 0], size: [0.004 * H, palmHalfY * 0.94, palmHalfZ * 0.92] },
+    ];
+    armFingerCaps[s] = grow(armRegion[String(s)], steps);
   }
 
   // LEG.
@@ -338,28 +380,52 @@ export function buildHumanoid(p = {}) {
       seg(-legLen * 0.18, thighR * 0.78, thighR * 0.54),   // calf
       seg(-legLen * 0.16, thighR * 0.62, thighR * 0.44),
       seg(-legLen * 0.14, thighR * 0.46, thighR * 0.34),   // ankle
-      // foot: long forward, wide, low
-      { offset: [0, -0.016 * H, 0.034 * H * o.footSize], scale: [1.15, 0.85, 3.20] },
-      { offset: [0, -0.004 * H, 0.030 * H * o.footSize], scale: [1.02, 0.92, 0.94] },
+      // FOOT.
+      //
+      // A real foot is roughly 0.15H long with the ankle sitting about a third
+      // of the way back from the heel, so the extrusion has to move BACKWARD as
+      // well as forward. Driving it only forward gave a 0.18 m stub with no heel.
+      { offset: [0, -0.014 * H, 0.010 * H * o.footSize], size: [0.030 * H, 0.022 * H, 0.048 * H * o.footSize] },
+      { offset: [0, -0.004 * H, 0.016 * H * o.footSize], size: [0.032 * H, 0.014 * H, 0.072 * H * o.footSize] },
     ]);
   }
 
   // ---- neck + head ---------------------------------------------------------
-  const headR = 0.072 * H * o.headScale;
+  // HEAD.
+  //
+  // Sizes are absolute half-extents so the skull cannot drift. The head is a
+  // 3x3 patch on the neck socket, so each extrusion step quadruples the grid it
+  // inherits — by the cranium there is enough resolution to carve facial
+  // features into the vertices rather than bolting separate shells on.
+  const headR = 0.074 * H * o.headScale;
+  const headBaseY = torsoTop + 0.030 * H * o.neck;
   grow(neckRegion, [
-    { offset: [0, 0.016 * H, 0], scale: [0.44 * o.neck, 1, 0.48] },
-    { offset: [0, 0.022 * H * o.neck, 0.002 * H], scale: [0.94, 1, 0.96] },
-    // jaw: narrower at the front
-    { offset: [0, 0.016 * H, 0.004 * H], scale: [1.06, 1, 1.04] },
-    // cheeks / mid-face
-    { offset: [0, headR * 0.30, 0.004 * H], scale: [1.22, 1, 1.18] },
-    // cranium
-    { offset: [0, headR * 0.42, 0], scale: [1.10, 1, 1.08] },
-    { offset: [0, headR * 0.40, 0], scale: [1.00, 1, 0.98] },
-    // crown
-    { offset: [0, headR * 0.34, -0.002 * H], scale: [0.70, 0.90, 0.72] },
-    { offset: [0, headR * 0.24, -0.002 * H], scale: [0.40, 0.70, 0.42] },
+    { offset: [0, 0.014 * H, 0], size: [0.026 * H * o.neck, 0.008 * H, 0.028 * H * o.neck] },
+    // jaw: narrower at the front than the skull
+    { offset: [0, 0.020 * H * o.neck, 0.003 * H], size: [headR * 0.62, 0.020 * H, headR * 0.70] },
+    { offset: [0, headR * 0.28, 0.004 * H], size: [headR * 0.80, headR * 0.30, headR * 0.86] },  // mid-face
+    { offset: [0, headR * 0.34, 0], size: [headR * 0.86, headR * 0.34, headR * 0.88] },          // cranium
+    { offset: [0, headR * 0.42, -0.002 * H], size: [headR * 0.78, headR * 0.30, headR * 0.80] }, // upper skull
+    { offset: [0, headR * 0.46, -0.004 * H], size: [headR * 0.50, headR * 0.22, headR * 0.54] }, // crown
+    { offset: [0, headR * 0.30, -0.004 * H], size: [headR * 0.22, headR * 0.14, headR * 0.24] }, // top
   ]);
+  void headBaseY;
+
+  /* ------------------------------------------------------ refine the head */
+  // The head starts as a 3x3 patch and only reaches ~6 height bands by the
+  // crown, which is coarser than the eye/brow/nose/mouth bands are apart — the
+  // facial tuning below would have nowhere to live.
+  //
+  // `subdivideSelected` was the obvious tool and it is the wrong one here: it
+  // splits only quads and leaves T-junctions along the boundary of the
+  // selection, so the mesh stopped being watertight the moment the head was
+  // refined. Catmull-Clark on the whole surface is uniform (no T-junctions) and
+  // costs a single pass, so the body is subdivided once and the features are
+  // then carved into the finer grid.
+  {
+    const sub = catmullClark(mesh);
+    mesh = { verts: sub.verts, faces: sub.faces };
+  }
 
   /* ------------------------------------------------------ arm down-swing */
   // Rotate the horizontal arm down about the shoulder joint. The pivot is the
@@ -383,11 +449,122 @@ export function buildHumanoid(p = {}) {
     });
   }
 
+  /* ------------------------------------------------------ shoulder blending */
+  // The down-swing rotates the arm rigidly, which leaves a hard crease where the
+  // deltoid meets the torso (the rotation line is visible as a diagonal edge).
+  // A short smoothstep blend across the joint, pulling vertices toward a sphere
+  // fitted to the shoulder, rounds that transition without moving the arm.
+  {
+    const R = (0.040 + 0.008 * mus) * H;      // shoulder cap radius
+    for (const s of [1, -1]) {
+      const sx = s * shoulderW * 0.94;
+      const sy = torsoTop - 0.012 * H;
+      // Keep the band tight: a wide band reaches into the upper arm and the
+      // sphere target, which is smaller than the arm, flattens it.
+      const band = R * 0.85;
+      mesh.verts = mesh.verts.map((v) => {
+        const dx = v[0] - sx, dy = v[1] - sy;
+        const d = Math.hypot(dx, dy, v[2] * 0.7);
+        if (d > band) return v;
+        // 1 at the joint centre, 0 at the band edge
+        const k = 1 - Math.min(1, d / band);
+        const w = k * k * (3 - 2 * k);
+        // sphere target at the same direction, radius R
+        if (d < 1e-6) return v;
+        const tx = sx + (dx / d) * R;
+        const ty = sy + (dy / d) * R;
+        const tz = (v[2] / d) * R;
+        const mix = w * 0.30;
+        return [
+          v[0] + (tx - v[0]) * mix,
+          v[1] + (ty - v[1]) * mix,
+          v[2] + (tz - v[2]) * mix,
+        ];
+      });
+    }
+  }
+
+  /* --------------------------------------------------------------- fingers */
+  // Fingers are grown AFTER the arm hangs down, so "outward along the arm" is
+  // -Y in world space.
+  //
+  // The palm cap is found by slicing, not by a bottom-Y threshold: for each
+  // side, take every face whose normal points mostly down and whose centre is
+  // among the lowest 4% of that side's geometry. Thresholding on an absolute
+  // offset from the lowest vertex kept only 5 of the 1x5 cap faces, and failed
+  // entirely on the other side, because the two hands do not sit at identical
+  // heights once the down-swing is applied.
+  for (const s of [1, -1]) {
+    const sideFaces = [];
+    let lowY = Infinity;
+    for (const f of mesh.faces) {
+      const c = faceCenter(mesh.verts, f);
+      if (c[0] * s < 0.12 * H) continue;
+      sideFaces.push(f);
+      if (c[1] < lowY) lowY = c[1];
+    }
+    if (!sideFaces.length) continue;
+
+    const band = 0.05 * H;
+    const capFaces = [];
+    mesh.faces.forEach((f, fi) => {
+      const c = faceCenter(mesh.verts, f);
+      if (c[0] * s < 0.12 * H) return;
+      if (c[1] > lowY + band) return;
+      const n = faceNormal(mesh.verts, f);
+      if (n[1] > -0.5) return;                       // must face down
+      capFaces.push(fi);
+    });
+
+    // group into columns by Z (across the hand)
+    const cols = new Map();
+    for (const fi of capFaces) {
+      const c = faceCenter(mesh.verts, mesh.faces[fi]);
+      // 5 columns across a palm of half-width 0.040*H -> each column centre is
+      // ~0.016*H apart, so quantise at half that to keep them distinct.
+      const k = Math.round(c[2] / (0.007 * H));
+      if (!cols.has(k)) cols.set(k, []);
+      cols.get(k).push(fi);
+    }
+    const keys = [...cols.keys()].sort((a, b) => a - b);
+
+    keys.forEach((k, idx) => {
+      const group = cols.get(k);
+      if (!group.length) return;
+      const colPts = new Set();
+      for (const fi of group) for (const i of mesh.faces[fi]) colPts.add(keyOf(mesh.verts[i]));
+
+      const isThumb = idx === 0 || idx === keys.length - 1;
+      const len = (isThumb ? 0.024 : 0.030 + 0.003 * (idx % 3)) * H * o.handSize;
+      const dirZ = isThumb ? (idx === 0 ? -1 : 1) : 0;
+      const drift = isThumb ? 0.55 : 0.05;
+      grow(colPts, [
+        { offset: [dirZ * drift * len * 0.45, -len * 0.55, dirZ * drift * len * 0.55], scale: [1, 1, 0.94] },
+        { offset: [dirZ * drift * len * 0.25, -len * 0.45, dirZ * drift * len * 0.30], scale: [0.84, 0.88, 0.80] },
+      ]);
+    });
+  }
+
   /* ------------------------------------------------------------- shaping */
   // Everything below only moves vertices: topology is already final.
 
-  const chinY = torsoTop + 0.070 * H * o.neck;
-  const headCY = chinY + headR * 1.05;
+  // Measure the head from the geometry instead of predicting it from the
+  // extrusion steps. Absolute landmark heights (0.885*H for eyes etc.) were
+  // silently wrong once the neck length changed: the mouth landed BELOW the
+  // jaw, so the whole feature block did nothing. Anchoring the bands to the
+  // measured head box keeps them on the face for every parameter combination.
+  const headVerts = mesh.verts.filter((v) => v[1] > torsoTop + 0.02 * H);
+  let headMinY = Infinity, headMaxY = -Infinity, headMaxZ = 0;
+  for (const v of headVerts) {
+    if (v[1] < headMinY) headMinY = v[1];
+    if (v[1] > headMaxY) headMaxY = v[1];
+    if (v[2] > headMaxZ) headMaxZ = v[2];
+  }
+  const headSpan = Math.max(1e-6, headMaxY - headMinY);
+  // 0 at the jaw, 1 at the crown
+  const faceT = (y) => (y - headMinY) / headSpan;
+  const faceZ = headMaxZ;
+  const frontThresh = faceZ * 0.30;
 
   mesh.verts = mesh.verts.map((v) => {
     let [x, y, z] = v;
@@ -408,22 +585,49 @@ export function buildHumanoid(p = {}) {
       const t = Math.max(0, 1 - Math.abs(y - 0.505 * H) / (0.05 * H));
       z -= 0.015 * H * o.hips * t;
     }
-    // deltoid / biceps bulge: widen the shoulder region outward
+    // deltoid / biceps
     if (mus > 0.05) {
       const armT = Math.max(0, 1 - Math.abs(Math.abs(x) - shoulderW * 0.95) / (0.055 * H));
-      if (armT > 0 && y > 0.70 * H && y < 0.80 * H) {
-        const k = 1 + 0.16 * mus * armT;
-        x *= k;
-      }
+      if (armT > 0 && y > 0.70 * H && y < 0.80 * H) x *= 1 + 0.16 * mus * armT;
     }
-    // head: flatten the back of the skull, taper the jaw, add a brow/nose hint
-    if (y > chinY - 0.01 * H) {
-      const rel = (y - headCY) / headR;
-      if (z < 0) z *= 0.94;
-      if (rel < -0.15) {
-        const t = Math.min(1, (-rel - 0.15) / 0.85);
-        x *= 1 - 0.24 * t;
-        z *= 1 - 0.05 * t;
+
+    // ---- head ---------------------------------------------------------------
+    if (y > headMinY - 0.01 * H) {
+      const t = faceT(y);                  // 0 jaw .. 1 crown
+
+      if (z < 0) z *= 0.94;                // flatter occiput
+      if (t < 0.16) {                      // jaw taper
+        const k = 1 - (0.16 - t) / 0.16;
+        x *= 1 - 0.22 * k;
+      }
+
+      // Facial form is applied only to the forward-facing shell, using
+      // smooth radial bumps so Catmull-Clark does not turn them into creases.
+      if (z > frontThresh) {
+        const u = x / Math.max(1e-6, Math.max(...headVerts.map((p) => Math.abs(p[0]))));
+        const bump = (cu, ct, su, st, amp) =>
+          amp * Math.exp(-(((u - cu) / su) ** 2)) * Math.exp(-(((t - ct) / st) ** 2));
+
+        // eye sockets (shallow), brow ridge above
+        z -= bump(-0.42, 0.625, 0.24, 0.075, 0.0175 * H);
+        z -= bump(0.42, 0.625, 0.24, 0.075, 0.0175 * H);
+        z += bump(-0.40, 0.712, 0.28, 0.045, 0.0090 * H);
+        z += bump(0.40, 0.712, 0.28, 0.045, 0.0090 * H);
+
+        // nose ridge on the midline, with nostril flare
+        z += bump(0.00, 0.560, 0.11, 0.100, 0.0330 * H);
+        z += bump(-0.19, 0.495, 0.12, 0.038, 0.0080 * H);
+        z += bump(0.19, 0.495, 0.12, 0.038, 0.0080 * H);
+
+        // mouth groove with lips either side, and a chin below
+        z -= bump(0.00, 0.372, 0.28, 0.028, 0.0090 * H);
+        z += bump(0.00, 0.404, 0.28, 0.020, 0.0060 * H);
+        z += bump(0.00, 0.340, 0.28, 0.020, 0.0060 * H);
+        z += bump(0.00, 0.285, 0.32, 0.055, 0.0080 * H);
+
+        // cheekbones
+        z += bump(-0.62, 0.470, 0.20, 0.090, 0.0060 * H);
+        z += bump(0.62, 0.470, 0.20, 0.090, 0.0060 * H);
       }
     }
     return [x, y, z];
