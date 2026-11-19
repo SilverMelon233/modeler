@@ -77,7 +77,8 @@ node src/bin/qf.js patch    examples/hero.quadforge.json examples/patches/muscul
 src/core/            无渲染依赖的几何内核（Node 与浏览器共用）
   mesh.js            四边形/多边形拓扑、Catmull-Clark、挤出、雕刻、CSG 修复
   primitives.js      11 种图元（含 loft / tube / extrude）
-  character.js       参数化人物生成器
+  character.js       人物门面（当前实现委托给 humanoid.js）
+  humanoid.js        单连通曲面人体：盒状建模 + 挤出四肢/头
   booleans.js        three-bvh-csg 封装
   recipe.js          .quadforge 编译器
   schema.js          JSON Schema + 校验器
@@ -100,6 +101,10 @@ docs/FORMAT.md       格式规范
 ## 已知取舍
 
 - **CSG 是三角形而非四边形**：`three-bvh-csg` 输出三角网格，布尔结果无法再被干净地细分。需要四边形的部件请用 `merge` 而非布尔。
-- **人物是单壳体**：没有骨骼、没有 UV、没有表情混合形状。要动画请导出 glTF 后在 DCC 里绑定。
+- **人物是单一连续曲面**：由盒状建模挤出四肢与头，全四边面、水密。
+  参数只移动顶点，所以拓扑在全部参数空间内不变（等同 morph target），
+  可安全细分与雕刻。仍没有骨骼、UV、表情。
+- **头发/护甲不属于身体**：它们是外观层。旧版把独立壳体拼上去，会在细分时裂开，
+  正是这次重写要消除的问题。
 - **雕刻不改拓扑**：笔刷只移动顶点，需要先细分到 2–3 级再刻细节。
 - **`loft` 半轴 vs `roundedBox` 全尺寸**：历史约定不一致，规范里已显式标注。

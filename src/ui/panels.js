@@ -110,10 +110,7 @@ export function buildUI(app) {
       slider({ label: '胸型', value: charState.bust, min: 0, max: 1, onInput: (v) => { charState.bust = v; } }),
       slider({ label: '臂长', value: charState.armLength, min: 0.8, max: 1.2, onInput: (v) => { charState.armLength = v; } }),
       slider({ label: '腿长', value: charState.legLength, min: 0.8, max: 1.2, onInput: (v) => { charState.legLength = v; } }),
-      el('div', { class: 'row2' },
-        toggle({ label: '头发', value: charState.hair, onChange: (v) => { charState.hair = v; } }),
-        toggle({ label: '护甲', value: charState.armor, onChange: (v) => { charState.armor = v; } }),
-      ),
+      el('p', { class: 'note' }, '单块连续网格：参数只移动顶点，拓扑不变，因此可安全细分与雕刻。头发与服装属于外观层，不并入身体网格。'),
       el('button', {
         class: 'wide-btn',
         onclick: () => {

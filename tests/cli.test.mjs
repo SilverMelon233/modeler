@@ -84,8 +84,10 @@ test('qf compile writes a valid OBJ', () => {
   assert.match(text, /^# QuadForge export/m);
   const verts = text.split('\n').filter((l) => l.startsWith('v ')).length;
   const faces = text.split('\n').filter((l) => l.startsWith('f '));
-  assert.ok(verts > 1000);
-  assert.ok(faces.length > 1000);
+  // The body is now a single 500-ish vertex quad surface rather than thousands
+  // of vertices from assembled primitives, so the threshold tracks the shape.
+  assert.ok(verts > 300, `unexpected vertex count ${verts}`);
+  assert.ok(faces.length > 300, `unexpected face count ${faces.length}`);
   const maxIdx = Math.max(...faces.flatMap((l) => l.slice(2).trim().split(/\s+/).map(Number)));
   assert.ok(maxIdx <= verts);
 });

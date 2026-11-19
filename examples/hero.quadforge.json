@@ -28,8 +28,7 @@
         "hips": 0.45,
         "armLength": 1.0,
         "legLength": 1.0,
-        "hair": true,
-        "armor": true
+        "bust": 0.1
       },
       "material": "skin",
       "subdiv": 0

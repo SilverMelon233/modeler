@@ -1,16 +1,26 @@
 /**
- * CHARACTER BUILDER — parametric humanoid generator.
+ * CHARACTER — public facade.
  *
- * Proportions follow real anthropometry for a 1.8 m adult, expressed as
- * fractions of total height H. Every part overlaps its neighbour so the
- * assembled shell is watertight after the global weld.
+ * `buildCharacter` returns a SINGLE connected quad surface built by box
+ * modelling (see humanoid.js). That is the property that matters: one surface
+ * keeps its shape under Catmull-Clark subdivision and under sculpting, whereas
+ * the old assembly of ~40 independent shells tore open at every joint.
  *
- * Parts: torso (lofted superellipse), neck, trapezius, head (shaped sphere),
- * nose/brow/ears/eyes, hair cap, shoulder deltoids, arms (upper + fore),
- * hands with 5 fingers + thumb, pelvis wrap, legs (thigh + calf), feet.
+ * The assembly version is kept as `buildAssemblyCharacter` because it is
+ * useful for comparison and for pieces that genuinely are separate solids.
  */
 import { sphere, cylinder, roundedBox, tubeAlong, loft } from './primitives.js';
 import { add, sub, mul, norm, len, solidify, fixWinding } from './mesh.js';
+import { buildHumanoid, HUMANOID_DEFAULTS } from './humanoid.js';
+
+/**
+ * @param {object} p HUMANOID_DEFAULTS overrides
+ * @returns {{verts:number[][], faces:number[][]}} one closed quad surface
+ */
+export function buildCharacter(p = {}) {
+  return buildHumanoid(p);
+}
+
 
 function concat(parts) {
   const verts = [];
@@ -54,29 +64,26 @@ function box(w, h, d, radius = 0.35, n = 4) {
   return transform(roundedBox(1, radius, n), { scale: [w, h, d] });
 }
 
-export const CHAR_DEFAULTS = {
-  height: 1.8,
-  build: 0.45,       // 0 slim .. 1 heavy
-  muscle: 0.55,
-  headScale: 1,
-  neck: 1,
-  armLength: 1,
-  legLength: 1,
-  handSize: 1,
-  footSize: 1,
-  bust: 0,
-  shoulder: 0.5,
-  belly: 0.3,
-  hips: 0.5,
-  hair: true,
-  armor: false,
-};
+/**
+ * Parameters for the single-surface body.
+ *
+ * `hair` and `armor` are deliberately absent: the whole point of this mesh is
+ * that it is one surface used for deformation, so bolting separate shells onto
+ * it would reintroduce exactly the seams this rewrite removed. Those become
+ * material/appearance concerns or a second export, not body parameters.
+ */
+export const CHAR_DEFAULTS = { ...HUMANOID_DEFAULTS };
 
 /**
+ * The original assembly generator: ~40 independent closed shells.
+ *
+ * Kept for A/B comparison and for shapes that really are separate solids, but
+ * NOT the default: disjoint shells cannot stay welded under subdivision, so
+ * every joint between parts opens into a seam.
+ *
  * @param {object} p see CHAR_DEFAULTS
- * @returns {{verts:number[][], faces:number[][]}}
  */
-export function buildCharacter(p = {}) {
+export function buildAssemblyCharacter(p = {}) {
   const o = { ...CHAR_DEFAULTS, ...p };
   const H = o.height;
 
@@ -150,7 +157,9 @@ export function buildCharacter(p = {}) {
   const neckR = (0.026 + 0.005 * mus) * H * o.neck;
   const neckBase = shoulderY - 0.004 * H;
   const neckTop = chinY - 0.006 * H;
-  parts.push(transform(cylinder(neckR, neckTop - neckBase + 0.03 * H, 14, 2), {
+  // The neck must be long enough to be inside the chest at one end and inside
+  // the skull at the other; otherwise subdividing exposes both seams.
+  parts.push(transform(cylinder(neckR, neckTop - neckBase + 0.075 * H, 14, 2), {
     pos: [0, (neckBase + neckTop) / 2, -0.004 * H],
   }));
   // trapezius: a low wide wedge blending shoulders into the neck
@@ -223,10 +232,10 @@ export function buildCharacter(p = {}) {
   /* ----------------------------------------------------------- left/right */
   for (const s of [-1, 1]) {
     /* deltoid */
-    const deltoidR = (0.030 + 0.008 * mus) * H;
+    const deltoidR = (0.034 + 0.008 * mus) * H;
     parts.push(transform(sphere(deltoidR, 14, 12), {
-      pos: [s * shoulderW * 0.86, shoulderY - 0.016 * H, 0],
-      scale: [0.95, 1.10, 0.95],
+      pos: [s * shoulderW * 0.87, shoulderY - 0.020 * H, 0],
+      scale: [0.92, 1.18, 1.0],
     }));
 
     /* arm: upper + forearm, relaxed A-pose hanging slightly out */
@@ -248,12 +257,29 @@ export function buildCharacter(p = {}) {
     const foreMidR = (0.021 + 0.005 * mus) * H;
     const wristR = 0.015 * H;
 
+    // The two segments must OVERLAP at the elbow, not merely share a point.
+    // Each tube is a closed shell; Catmull-Clark shrinks every closed shell
+    // toward its own centroid, so a shared-point joint becomes a visible gap
+    // once the model is subdivided. Extending each segment past the joint by
+    // ~1.6x its radius keeps them interpenetrating at every subdivision level.
+    const overlap = Math.max(elbowR, upperR) * 2.2;
+    // upper arm ends BELOW the elbow, forearm starts ABOVE it: the two shells
+    // interpenetrate instead of meeting at a point.
+    const upperEnd = [elbow[0], elbow[1] - overlap * 0.5, elbow[2]];
+    const foreStart = [elbow[0], elbow[1] + overlap * 0.5, elbow[2]];
+    // Start the arm INSIDE the deltoid sphere so the two shells overlap; a
+    // tangent joint splits visibly once each shell is subdivided.
+    const armStart = [
+      s * shoulderW * 0.86,
+      shoulderY - 0.010 * H,
+      0,
+    ];
     const upper = tubeAlong(
-      [sh, [sh[0] + s * 0.012 * H, sh[1] - armLen * 0.25, -0.004 * H], elbow],
+      [armStart, [sh[0] + s * 0.012 * H, sh[1] - armLen * 0.25, -0.004 * H], upperEnd],
       [upperR, upperR * 0.96, elbowR], 12,
     );
     const fore = tubeAlong(
-      [elbow, [elbow[0] + s * 0.010 * H, (elbow[1] + wrist[1]) / 2, -0.002 * H], wrist],
+      [foreStart, [elbow[0] + s * 0.010 * H, (elbow[1] + wrist[1]) / 2, -0.002 * H], wrist],
       [elbowR, foreMidR, wristR], 12,
     );
     parts.push(upper, fore);
@@ -264,7 +290,9 @@ export function buildCharacter(p = {}) {
     const palmLen = 0.054 * H * hs;
     const palmW = 0.042 * H * hs;
     const palmTh = 0.019 * H * hs;
-    const palmC = add(wrist, mul(dir, palmLen * 0.50));
+    // Start the palm slightly *before* the wrist so it interpenetrates the
+    // forearm; otherwise subdividing separates the hand from the arm.
+    const palmC = add(wrist, mul(dir, palmLen * 0.34));
     const yaw = Math.atan2(dir[0], -dir[1]);
     parts.push(transform(box(palmW * 2, palmLen, palmTh * 2, 0.4), {
       pos: palmC, rot: [0, 0, -yaw],
@@ -288,7 +316,8 @@ export function buildCharacter(p = {}) {
 
     /* leg: hip -> knee -> ankle */
     const legLen = 0.445 * H * o.legLength;
-    const hip = [s * pelvisW * 0.52, pelvisY - 0.010 * H, 0];
+    // Start the thigh above the hip joint so it is swallowed by the pelvis.
+    const hip = [s * pelvisW * 0.52, pelvisY + 0.020 * H, 0];
     const knee = [s * pelvisW * 0.56, pelvisY - legLen * 0.50, 0.006 * H];
     const ankleY = Math.max(0.045 * H, pelvisY - legLen);
     const ankle = [s * pelvisW * 0.58, ankleY, -0.002 * H];
@@ -298,12 +327,16 @@ export function buildCharacter(p = {}) {
     const calfR = (0.026 + 0.008 * mus) * H;
     const ankleR = 0.014 * H;
 
+    // Same overlap rule at the knee as at the elbow.
+    const kneeOverlap = Math.max(kneeR, thighR * 0.86) * 2.2;
+    const thighEnd = [knee[0], knee[1] - kneeOverlap * 0.5, knee[2]];
+    const calfStart = [knee[0], knee[1] + kneeOverlap * 0.5, knee[2]];
     const thigh = tubeAlong(
-      [hip, [(hip[0] + knee[0]) / 2, (hip[1] + knee[1]) / 2, 0.004 * H], knee],
+      [hip, [(hip[0] + knee[0]) / 2, (hip[1] + knee[1]) / 2, 0.004 * H], thighEnd],
       [thighR, thighR * 0.86, kneeR], 16,
     );
     const calf = tubeAlong(
-      [knee, [(knee[0] + ankle[0]) / 2, (knee[1] + ankle[1]) / 2, -0.004 * H], ankle],
+      [calfStart, [(knee[0] + ankle[0]) / 2, (knee[1] + ankle[1]) / 2, -0.004 * H], ankle],
       [kneeR, calfR, ankleR], 14,
     );
     // calf bulge at the back

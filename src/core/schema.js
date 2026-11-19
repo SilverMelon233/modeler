@@ -167,8 +167,6 @@ export const SCHEMA = {
         shoulder: { type: 'number', minimum: 0, maximum: 1 },
         belly: { type: 'number', minimum: 0, maximum: 1 },
         hips: { type: 'number', minimum: 0, maximum: 1 },
-        hair: { type: 'boolean' },
-        armor: { type: 'boolean' },
       },
     },
     object: {

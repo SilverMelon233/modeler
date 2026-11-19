@@ -9,7 +9,8 @@ import {
   catmullClark, subdivide, extrudeFaces, insetFaces, mergeByDistance,
   signedVolume, mirrorX, solidify, healTJunctions, fillHoles, compact,
 } from '../src/core/mesh.js';
-import { buildCharacter } from '../src/core/character.js';
+import { buildCharacter, buildAssemblyCharacter } from '../src/core/character.js';
+import { componentCount, allQuads } from '../src/core/humanoid.js';
 import { meshReport } from '../src/core/checks.js';
 import { applyTRS, fromTRS, invert, multiply, transformPoint } from '../src/core/transform.js';
 import { booleanOp } from '../src/core/booleans.js';
@@ -192,9 +193,64 @@ test('character parameters are monotonic where expected', () => {
   assert.ok(meshReport(short).size[1] < meshReport(slim).size[1]);
 });
 
-test('character with hair and armor stays watertight', () => {
-  const m = buildCharacter({ hair: true, armor: true, height: 1.85 });
-  assert.equal(meshReport(m).openEdges, 0);
+/* ------------------------------------------------- single-surface body */
+
+test('the body is ONE connected surface, not assembled shells', () => {
+  // This is the property the rewrite exists for. The old generator produced
+  // ~40 disjoint shells, which tear open at every joint once subdivided.
+  const m = buildCharacter({});
+  assert.equal(componentCount(m), 1, 'body must be a single surface');
+  assert.ok(allQuads(m), 'body must be entirely quads');
+});
+
+test('the body stays a single surface after subdivision', () => {
+  const m = buildCharacter({});
+  for (const levels of [1, 2]) {
+    const s = subdivide(m, levels);
+    assert.equal(componentCount(s), 1, `L${levels} must remain one surface`);
+    assert.equal(meshReport(s).watertight, true, `L${levels} must stay watertight`);
+  }
+});
+
+test('subdivision does not tear the body open (the old failure mode)', () => {
+  // With disjoint shells, Catmull-Clark shrinks each shell toward its own
+  // centroid and the gaps between them become visible. A single surface has no
+  // such gaps by construction; this asserts the winding and closure survive.
+  const m = buildCharacter({ height: 1.8 });
+  const s = subdivide(m, 2);
+  const r = meshReport(s);
+  assert.equal(r.openEdges, 0);
+  assert.equal(r.nonManifoldEdges, 0);
+  assert.ok(r.volume > 0, 'subdivided body must keep positive volume');
+});
+
+test('parameters keep topology invariant (they are morphs, not rebuilds)', () => {
+  const shapes = [
+    {}, { build: 0, muscle: 0 }, { build: 1, belly: 1, hips: 1 },
+    { height: 1.4 }, { height: 2.1, armLength: 0.8, legLength: 1.2 },
+    { headScale: 1.3, shoulder: 1, bust: 1, neck: 1.4 },
+  ];
+  const counts = shapes.map((p) => {
+    const m = buildCharacter(p);
+    const r = meshReport(m);
+    assert.equal(r.watertight, true, `watertight for ${JSON.stringify(p)}`);
+    assert.equal(componentCount(m), 1, `single surface for ${JSON.stringify(p)}`);
+    return `${m.verts.length}/${m.faces.length}`;
+  });
+  assert.equal(new Set(counts).size, 1, `topology changed across params: ${counts.join(' ')}`);
+});
+
+test('body proportions track height exactly', () => {
+  for (const h of [1.5, 1.75, 2.0]) {
+    const r = meshReport(buildCharacter({ height: h }));
+    assert.ok(Math.abs(r.size[1] - h) < 0.01, `height ${h} -> ${r.size[1]}`);
+  }
+});
+
+test('the assembly generator is retained for comparison and still watertight', () => {
+  const m = buildAssemblyCharacter({ height: 1.8 });
+  assert.equal(meshReport(m).watertight, true);
+  assert.ok(componentCount(m) > 1, 'assembly is expected to be multi-shell');
 });
 
 /* --------------------------------------------------------------- schema */
