@@ -11,9 +11,14 @@
 ```bash
 npm install
 npm run dev          # http://localhost:5173
-npm run build        # 产出 dist/
+npm run build        # 产出 dist/（含 examples/）
 npm test             # 59 个内核 + CLI 测试
+
+docker build -t modeler . && docker run --rm -p 8080:8080 modeler
 ```
+
+线上：<http://modeler.develop.svc.cluster.local/>（k8s `develop` 命名空间）
+部署说明见 [deploy/README.md](deploy/README.md)。
 
 ---
 
